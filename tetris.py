@@ -283,114 +283,77 @@ class TetrisEnv:
         return lowest_free_rows
 
     def get_feature_values_jitted(self, lowest_free_rows, representation, num_rows, num_columns):
-        """Compute feature subset: rows_with_holes, column_transitions, holes, cumulative_wells, row_transitions, hole_depth
+        """
+        Compute feature subset: rows_with_holes, column_transitions, holes, cumulative_wells, row_transitions, hole_depth
         Returns list in that order.
         """
-        # ensure representation and lowest_free_rows are NumPy arrays
-        rep = np.array(representation, dtype=int)
-        wall = np.ones((1, rep.shape[1]))
-        rep = np.concatenate((wall, rep.T, wall), axis=0).T
-        lowest_free_rows = np.array(lowest_free_rows, dtype=int)
-        lowest_free_rows_expand = np.concatenate(([num_rows], lowest_free_rows, [num_rows]))
+        board = np.array(representation, dtype=int)
+        rows, cols = board.shape
 
-        rows_with_holes_set = {100}
+        # Rows with holes: number of rows with at least one hole
+        rows_with_holes = 0
+        for r in range(rows):
+            has_hole = False
+            for c in range(cols):
+                if board[r, c] == 0 and np.any(board[:r, c] == 1):
+                    has_hole = True
+                    break
+            if has_hole:
+                rows_with_holes += 1
+
+        # Column transitions
         column_transitions = 0
+        for c in range(cols):
+            prev = 1  # Assume outside bottom is full
+            for r in range(rows):
+                curr = board[r, c]
+                if curr != prev:
+                    column_transitions += 1
+                prev = curr
+            if prev == 0:
+                column_transitions += 1  # Outside top is empty
+
+        # Holes and hole depth
         holes = 0
-        # landing_height
-        cumulative_wells = 0
-        row_transitions = 0
-        # eroded_piece_cells
         hole_depth = 0
-
-        row_transitions += num_rows - representation[:, -2].sum()  # Counting the right hand wall.
-
-        for col_ix, lowest_free_row in zip(np.arange(len(lowest_free_rows)) + 1, lowest_free_rows):
-
-            column_transitions += 1  # Always one column transitions to top.
-            local_well_streak = 0
-
-            if lowest_free_row > 0:  # NON EMPTY COLUMNS
-
-                col = rep[:lowest_free_row, col_ix]
-                number_of_full_cells_above = np.sum(col)  # Needed for hole_depth
-
-                # Counting the transitions from higher left stack to current.
-                if lowest_free_rows_expand[col_ix - 1] > lowest_free_rows_expand[col_ix]:
-                    row_transitions += abs(lowest_free_rows_expand[col_ix - 1] - lowest_free_rows_expand[col_ix])
-
-                cell_below = 1
-
-                for row_ix, cell in enumerate(col):
-
-                    if cell == 0:
-
-                        # Holes
-                        holes += 1
-
-                        rows_with_holes_set.add(row_ix)
-                        if col[row_ix + 1] == 1: hole_depth += number_of_full_cells_above
-
-                        # Column transitions
-                        if cell_below:
-                            column_transitions += 1
-
-                        # Wells and row transitions
-                        cell_left = representation[row_ix, col_ix - 1]
-                        cell_right = representation[row_ix, col_ix + 1]
-                        if cell_left:
-                            row_transitions += 1
-                            if cell_right:
-                                local_well_streak += 1
-                                cumulative_wells += local_well_streak
-                            else:
-                                local_well_streak = 0
+        for c in range(cols):
+            for r in range(rows):
+                if board[r, c] == 0 and np.any(board[:r, c] == 1):
+                    holes += 1
+                    # Count filled cells directly above
+                    above = board[:r, c][::-1]
+                    for cell in above:
+                        if cell == 1:
+                            hole_depth += 1
                         else:
-                            local_well_streak = 0
+                            break
 
-                    else:  # cell is 1!
-                        local_well_streak = 0
+        # Cumulative wells
+        cumulative_wells = 0
+        for c in range(cols):
+            well_depth = 0
+            for r in range(rows):
+                left = 1 if c == 0 else board[r, c - 1]
+                right = 1 if c == cols - 1 else board[r, c + 1]
+                if board[r, c] == 0 and left == 1 and right == 1:
+                    well_depth += 1
+                    cumulative_wells += well_depth
+                else:
+                    well_depth = 0
 
-                        # Keep track of full cells above for hole_depth-feature
-                        number_of_full_cells_above -= 1
+        # Row transitions
+        row_transitions = 0
+        for r in range(rows):
+            prev = 1  # Assume outside left is full
+            for c in range(cols):
+                curr = board[r, c]
+                if curr != prev:
+                    row_transitions += 1
+                prev = curr
+            if prev == 0:
+                row_transitions += 1  # Outside right is full
 
-                        # Column transitions
-                        if not cell_below:
-                            column_transitions += 1
-
-                        # Row transitions
-                        cell_left = representation[row_ix, col_ix - 1]
-                        if not cell_left:
-                            row_transitions += 1
-
-                    # Define 'cell_below' for next (higher!) cell.
-                    cell_below = cell
-
-            else:
-                row_transitions += rep[:lowest_free_rows_expand[col_ix - 1], col_ix - 1].sum()
-
-                # Check wells until minimum(lowest_free_row_left, lowest_free_row_right)
-            # Check transitions until lowest_free_row_left
-            lowest_free_row_left = lowest_free_rows_expand[col_ix - 1]
-            lowest_free_row_right = lowest_free_rows_expand[col_ix + 1]
-            max_well_possibility = np.minimum(lowest_free_row_left, lowest_free_row_right)
-            if max_well_possibility > lowest_free_row:
-                for row_ix in range(lowest_free_row, max_well_possibility):
-                    cell_left = rep[row_ix, col_ix - 1]
-                    cell_right = rep[row_ix, col_ix + 1]
-                    if cell_left:
-                        if cell_right:
-                            local_well_streak += 1
-                            cumulative_wells += local_well_streak
-                        else:
-                            local_well_streak = 0
-                    else:
-                        local_well_streak = 0
-
-        rows_with_holes_set.remove(100)
-        rows_with_holes = len(rows_with_holes_set)
-        # if paper_order:
-        out = [rows_with_holes, column_transitions, holes, cumulative_wells, row_transitions, hole_depth]
-        return out
+        return [rows_with_holes, column_transitions, holes, cumulative_wells, row_transitions, hole_depth]
 
     def compute_features_from_board(self, board, landing_height_override=None):
         """Compute 8 features for given board.
@@ -447,17 +410,19 @@ class TetrisEnv:
             for state in current_states:
                 h = self._hash_state(state)
                 if h in seen:
+                    seen.add(h)
+                    all_states.append(state)
                     continue
-                seen.add(h)
-                all_states.append(state)
                 board, piece = state
                 if piece is None:
                     continue
+                features = self.compute_features_from_board(board)
                 actions = self._get_all_actions_for_piece(piece)
                 for action in actions:
                     successors = self.get_successor_states_given_action(state, action)
                     for succ_state, _ in successors:
                         next_states.append(succ_state)
+                    next_states.append(succ_state)
             current_states = deepcopy(next_states)
 
         # build graph (import networkx lazily to avoid hard dependency at module import)
