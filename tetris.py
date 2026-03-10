@@ -437,9 +437,9 @@ class TetrisEnv:
         all_states = []
         current_states = []
 
-        # initial states: empty board with every possible starting piece
+        # initial states: empty board with every possible starting piece (respect available_pieces)
         empty_board = [[0 for _ in range(self.cols)] for _ in range(self.rows)]
-        for piece in self.PIECES.keys():
+        for piece in self.available_pieces:
             current_states.append((deepcopy(empty_board), piece))
 
         while current_states:

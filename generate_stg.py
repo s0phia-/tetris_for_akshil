@@ -17,18 +17,30 @@ Examples:
   - Use specific pieces: PIECES = 'I,O,T'
 
 Outputs: {OUT}.gexf and (if matplotlib installed) {OUT}.png
+
+Features
+    Features:
+    0: rows_with_holes
+    1: column_transitions
+    2: holes
+    3: landing height
+    4: cumulative_wells
+    5: row_transitions
+    6: eroded pieces
+    7: hole_depth
+    
 """
 import os
 
 # ----------------- USER CONFIG -----------------
 # Board size
-ROWS = 5
-COLS = 6
+ROWS = 4
+COLS = 4
 
 # Pieces: either an int N (use first N pieces ['I','O','T','S','Z','J','L'])
 # or a comma-separated list of piece keys, e.g. 'I,O,T'
 # Examples: PIECES = '3'  or PIECES = 'I,O,T'
-PIECES = '3'
+PIECES = '2'
 
 # Output prefix
 OUT = f'stg_{ROWS}x{COLS}_{PIECES}'
