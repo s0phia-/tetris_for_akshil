@@ -233,53 +233,106 @@ class TetrisEnv(gym.Env):
 
         p = 1.0 / len(self.available_pieces)
         return [((deepcopy(new_board), npiece), p) for npiece in self.available_pieces]
-
+    
     def generate_stg(self, directed: bool = True, save_path: str | None = None):
-        """Generate the state-transition graph. Node feature: current tetrimino only."""
-
+        """Generate the STG with features attached to nodes."""
         seen = set()
-        all_states = []
-        empty_board = [[0] * self.cols for _ in range(self.rows)]
-        current_states = [(deepcopy(empty_board), p) for p in self.available_pieces]
-
-        while current_states:
-            next_states = []
-            for state in current_states:
-                h = self._hash_state(state)
-                if h in seen:
-                    continue
-                seen.add(h)
-                all_states.append(state)
-                _, piece = state
-                if piece is None:
-                    continue
-                for action in self._get_all_actions_for_piece(piece):
-                    for succ_state, _ in self.get_successor_states_given_action(state, action):
-                        next_states.append(succ_state)
-            current_states = deepcopy(next_states)
-
         stg = nx.DiGraph() if directed else nx.Graph()
-
-        for state in all_states:
-            _, piece = state
-            stg.add_node(self._hash_state(state), piece=str(piece), is_terminal=int(piece is None))
-
-        for state in all_states:
+        
+        empty_board = [[0] * self.cols for _ in range(self.rows)]
+        # Queue stores (board_as_tuple, piece_name)
+        queue = []
+        
+        # Initial states: Empty board + each possible starting piece
+        for p in self.available_pieces:
+            state = (tuple(tuple(r) for r in empty_board), p)
             h = self._hash_state(state)
-            _, piece = state
-            if piece is None:
-                continue
-            for action in self._get_all_actions_for_piece(piece):
-                for succ_state, _ in self.get_successor_states_given_action(state, action):
-                    hs = self._hash_state(succ_state)
-                    if not stg.has_edge(h, hs):
-                        stg.add_edge(h, hs)
+            seen.add(h)
+            
+            # Initial board has no "placement" history
+            feats = self.add_node_features(empty_board)
+            stg.add_node(h, **feats, piece=str(p), is_terminal=0)
+            queue.append(state)
 
-        if save_path is not None:
-            dir_name = os.path.dirname(save_path)
-            if dir_name:
-                os.makedirs(dir_name, exist_ok=True)
+        while queue:
+            curr_board_tuple, curr_piece = queue.pop(0)
+            if curr_piece is None: continue
+
+            # Convert back to list for simulation
+            board_list = [list(r) for r in curr_board_tuple]
+            
+            for action in self._get_all_actions_for_piece(curr_piece):
+                # Simulate the move
+                res_board, collided, lines, placed_rows = self._simulate_place(
+                    board_list, curr_piece, action[0], action[1]
+                )
+                
+                # Determine possible next pieces
+                next_pieces = [None] if collided else self.available_pieces
+                
+                for next_p in next_pieces:
+                    succ_state = (tuple(tuple(r) for r in res_board), next_p)
+                    h_succ = self._hash_state(succ_state)
+                    
+                    if h_succ not in seen:
+                        seen.add(h_succ)
+                        # Calculate features for the NEW state resulting from this placement
+                        feats = self.add_node_features(res_board, placed_rows)
+                        stg.add_node(h_succ, **feats, piece=str(next_p), is_terminal=int(next_p is None))
+                        queue.append(succ_state)
+                    
+                    # Add edge from current state to successor
+                    stg.add_edge(self._hash_state((curr_board_tuple, curr_piece)), h_succ)
+
+        if save_path:
             nx.write_gexf(stg, save_path)
-
         return stg
     
+    def add_node_features(self, board, placed_rows=None):
+        """Minimal NumPy implementation of Tetris features."""
+        b = np.array(board)
+        rows, cols = b.shape
+        feats = {}
+
+        # Landing Height: (y1 + y2) / 2 [Height measured from bottom]
+        if placed_rows:
+            heights = [rows - r for r in placed_rows]
+            feats['landing_height'] = (min(heights) + max(heights)) / 2.0
+        else:
+            feats['landing_height'] = 0.0
+
+        # Row Transitions (Boundaries are Full)
+        r_padded = np.pad(b, ((0, 0), (1, 1)), constant_values=1)
+        feats['row_transitions'] = np.sum(np.abs(np.diff(r_padded, axis=1)))
+
+        # Column Transitions (Top Empty: 0, Bottom Full: 1)
+        c_padded = np.pad(b, ((1, 1), (0, 0)), constant_values=((0, 1), (0, 0)))
+        feats['col_transitions'] = np.sum(np.abs(np.diff(c_padded, axis=0)))
+
+        # Holes, Hole Depth, and Rows with Holes
+        has_block_above = np.cumsum(b, axis=0) > 0
+        holes_mask = (b == 0) & has_block_above
+        
+        feats['holes'] = int(np.sum(holes_mask))
+        feats['rows_with_holes'] = int(np.sum(np.any(holes_mask, axis=1)))
+        
+        # Hole Depth: Sum of full cells directly above each hole
+        block_counts = np.cumsum(b, axis=0)
+        feats['hole_depth'] = int(np.sum(block_counts[holes_mask]))
+
+        # Cumulative Wells
+        well_sum = 0
+        l_full = np.hstack([np.ones((rows, 1)), b[:, :-1]])
+        r_full = np.hstack([b[:, 1:], np.ones((rows, 1))])
+        is_well = (b == 0) & (l_full == 1) & (r_full == 1)
+        
+        for c_idx in range(cols):
+            depth = 0
+            for r_idx in range(rows):
+                if is_well[r_idx, c_idx]:
+                    depth += 1
+                    well_sum += depth
+                else:
+                    depth = 0
+        feats['cumulative_wells'] = well_sum
+        return feats
