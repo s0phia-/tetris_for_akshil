@@ -208,7 +208,7 @@ class TetrisEnv(gym.Env):
 
         clean = [r for r in new_board if not all(r)]
         removed = self.rows - len(clean)
-        new_board = [[0] * self.cols] * removed + clean
+        new_board = [[0] * self.cols for _ in range(removed)] + clean
         return new_board, False, removed, placed_rows
 
     # ------------------------------------------------------------------
@@ -320,19 +320,20 @@ class TetrisEnv(gym.Env):
         block_counts = np.cumsum(b, axis=0)
         feats['hole_depth'] = int(np.sum(block_counts[holes_mask]))
 
-        # Cumulative Wells
+        # Wells (Succession of empty cells flanked by full cells/boundaries)
         well_sum = 0
-        l_full = np.hstack([np.ones((rows, 1)), b[:, :-1]])
-        r_full = np.hstack([b[:, 1:], np.ones((rows, 1))])
-        is_well = (b == 0) & (l_full == 1) & (r_full == 1)
-        
-        for c_idx in range(cols):
+        # Check Left/Right neighbors (Assume 1 if outside grid)
+        left_full = np.pad(b[:, :-1], ((0, 0), (1, 0)), constant_values=1) == 1
+        right_full = np.pad(b[:, 1:], ((0, 0), (0, 1)), constant_values=1) == 1
+        is_well_cell = (b == 0) & left_full & right_full
+
+        for c in range(cols):
             depth = 0
-            for r_idx in range(rows):
-                if is_well[r_idx, c_idx]:
+            for r in range(rows):
+                if is_well_cell[r, c]:
                     depth += 1
                     well_sum += depth
                 else:
-                    depth = 0
+                    depth = 0 # Succession broken by a block or a non-flanked empty cell
         feats['cumulative_wells'] = well_sum
         return feats
