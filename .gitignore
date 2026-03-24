@@ -1,0 +1,6 @@
+.DS_Store
+*.gexf
+*.png
+__pycache__/generate_stg.cpython-314.pyc
+__pycache__/human_test.cpython-314.pyc
+__pycache__/tetris.cpython-314.pyc
