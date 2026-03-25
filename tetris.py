@@ -53,7 +53,7 @@ class TetrisEnv(gym.Env):
         self.index_to_piece = {i: p for p, i in self.piece_to_index.items()}
 
         self.observation_space = spaces.Dict({
-            "board": spaces.MultiBinary((self.rows, self.cols)),
+            "board": spaces.MultiBinary((self.rows + 4, self.cols)),
             "piece": spaces.Discrete(len(self.available_pieces)),
         })
         self.action_space = spaces.Discrete(4 * self.cols)
@@ -69,7 +69,7 @@ class TetrisEnv(gym.Env):
 
     def reset(self, *, seed: int | None = None, options: dict | None = None):
         super().reset(seed=seed)
-        self._grid = [[0] * self.cols for _ in range(self.rows)]
+        self._grid = [[0] * self.cols for _ in range(self.rows + 4)]
         self._current_piece = self.np_random.choice(self.available_pieces)
         return self._obs(), {}
 
@@ -81,9 +81,6 @@ class TetrisEnv(gym.Env):
         if not (0 <= col <= self.cols - width):
             return self._obs(), 0, False, False, {"invalid_action": True}
 
-        if self._would_collide_grid(rot, 0, col):
-            return self._obs(), 0, True, False, {"invalid_action": False}
-
         row = 0
         while not self._would_collide_grid(rot, row + 1, col):
             row += 1
@@ -91,9 +88,11 @@ class TetrisEnv(gym.Env):
         for x, y in rot:
             self._grid[row + y][col + x] = 1
 
+        terminated = any((row + y) < 4 for x, y in rot)
+
         reward = self._clear_full_lines()
         self._current_piece = self.np_random.choice(self.available_pieces)
-        return self._obs(), reward, False, False, {"invalid_action": False}
+        return self._obs(), reward, terminated, False, {"invalid_action": False}
 
     def render(self):
         if self.render_mode == "ansi":
@@ -161,23 +160,24 @@ class TetrisEnv(gym.Env):
     # Board helpers — two variants: live grid and arbitrary board
     # ------------------------------------------------------------------
 
-    def _would_collide_grid(self, rot: list, row: int, col: int) -> bool:
+    def _would_collide_grid(self, rot, row, col):
         for x, y in rot:
             r, c = row + y, col + x
-            if r >= self.rows or self._grid[r][c] == 1:
+            if r >= len(self._grid) or self._grid[r][c] == 1:  # was self.rows
                 return True
         return False
 
-    def _would_collide_board(self, board: list, rot: list, row: int, col: int) -> bool:
+    def _would_collide_board(self, board, rot, row, col):
+        board_rows = len(board)   # use actual board height, not self.rows
         for x, y in rot:
             r, c = row + y, col + x
-            if r >= self.rows or board[r][c] == 1:
+            if r >= board_rows or board[r][c] == 1:
                 return True
         return False
 
     def _clear_full_lines(self) -> int:
         clean = [row for row in self._grid if not all(row)]
-        removed = self.rows - len(clean)
+        removed = self.rows + 4 - len(clean)
         self._grid = [[0] * self.cols] * removed + clean
         return removed
 
@@ -206,10 +206,12 @@ class TetrisEnv(gym.Env):
             new_board[r][c] = 1
             placed_rows.append(r)
 
+        terminated = any((row + y) < 4 for x, y in rot)
+
         clean = [r for r in new_board if not all(r)]
-        removed = self.rows - len(clean)
+        removed = self.rows + 4 - len(clean)
         new_board = [[0] * self.cols for _ in range(removed)] + clean
-        return new_board, False, removed, placed_rows
+        return new_board, terminated, removed, placed_rows
 
     # ------------------------------------------------------------------
     # State transition graph (offline planning utility)
@@ -239,7 +241,7 @@ class TetrisEnv(gym.Env):
         seen = set()
         stg = nx.DiGraph() if directed else nx.Graph()
         
-        empty_board = [[0] * self.cols for _ in range(self.rows)]
+        empty_board = [[0] * self.cols for _ in range(self.rows + 4)]
         # Queue stores (board_as_tuple, piece_name)
         queue = []
         
@@ -263,12 +265,12 @@ class TetrisEnv(gym.Env):
             
             for action in self._get_all_actions_for_piece(curr_piece):
                 # Simulate the move
-                res_board, collided, lines, placed_rows = self._simulate_place(
+                res_board, terminated, lines, placed_rows = self._simulate_place(
                     board_list, curr_piece, action[0], action[1]
                 )
                 
                 # Determine possible next pieces
-                next_pieces = [None] if collided else self.available_pieces
+                next_pieces = [None] if terminated else self.available_pieces
                 
                 for next_p in next_pieces:
                     succ_state = (tuple(tuple(r) for r in res_board), next_p)

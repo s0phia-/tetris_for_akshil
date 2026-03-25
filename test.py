@@ -57,19 +57,20 @@ class TestTetrisMechanics(unittest.TestCase):
         self.env = TetrisEnv(rows=4, cols=4, piece_types=['I'])
 
     def test_line_clear(self):
-        """Simulate filling a row with a horizontal piece and ensure it clears completely."""
-        # Start with an empty board
-        board = [[0,0,0,0], [0,0,0,0], [0,0,0,0], [0,0,0,0]]
+        """Simulate filling a row with a horizontal I-piece and ensure it clears."""
+        env = TetrisEnv(rows=0, cols=4)  # rows=0 → grid is 0+4=4 death rows only
+        # Or more explicitly: construct a board that matches env dimensions
+        env2 = TetrisEnv(rows=4, cols=4)
         
-        # Use Rotation 0 (Horizontal 'I') at Column 0
-        # This piece is 4 cells wide, so it fills the entire 4x4 row.
-        new_board, collided, lines, _ = self.env._simulate_place(board, 'I', 0, 0)
+        # Board must be (rows+4) × cols = 8 rows × 4 cols
+        board = [[0]*4 for _ in range(8)]
         
-        self.assertFalse(collided, "Horizontal I-piece should fit on an empty 4x4 board.")
-        self.assertEqual(lines, 1, "The row should have been cleared.")
+        new_board, terminated, lines, _ = env2._simulate_place(board, 'I', 0, 0)
         
-        # Since the piece was only 1 row high, the board should be empty again
-        self.assertEqual(sum(new_board[3]), 0, "Row 3 should be empty after the clear.")
+        self.assertFalse(terminated)
+        self.assertEqual(lines, 1)
+        # Bottom row (index 7) should be empty after clear
+        self.assertEqual(sum(new_board[7]), 0)
 
     def test_collision(self):
         """Placing a piece where it cannot fit should trigger collision."""

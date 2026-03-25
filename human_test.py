@@ -31,7 +31,7 @@ def human_play(stdscr):
     stdscr.nodelay(False)
     stdscr.keypad(True)
 
-    env = TetrisEnv(rows=20, cols=10)
+    env = TetrisEnv(rows=4, cols=4)
     obs, _ = env.reset()
     rot_idx = 0
     col = 0
