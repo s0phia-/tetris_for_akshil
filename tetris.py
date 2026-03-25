@@ -161,17 +161,16 @@ class TetrisEnv(gym.Env):
     # ------------------------------------------------------------------
 
     def _would_collide_grid(self, rot, row, col):
-        for x, y in rot:
-            r, c = row + y, col + x
-            if r >= len(self._grid) or self._grid[r][c] == 1:  # was self.rows
-                return True
-        return False
+        return self._would_collide_board(self._grid, rot, row, col)
 
     def _would_collide_board(self, board, rot, row, col):
-        board_rows = len(board)   # use actual board height, not self.rows
-        for x, y in rot:
+        """
+        Check if placing the current piece at (row, col) with the given rotation would collide with the existing grid.
+        """
+        board_rows = len(board) 
+        for x, y in rot:  # rots contain (x,y) coords of the 4 piece blocks relative to top-left of piece bounding box
             r, c = row + y, col + x
-            if r >= board_rows or board[r][c] == 1:
+            if r >= board_rows or board[r][c] == 1:  # check against current grid state
                 return True
         return False
 
